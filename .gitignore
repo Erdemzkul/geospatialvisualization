@@ -1,0 +1,13 @@
+*.shp
+*.dbf
+*.shx
+*.prj
+*.cpg
+*.zip
+*.qix
+*.sbn
+*.sbx
+*.html
+.Rhistory
+.RData
+.DS_Store

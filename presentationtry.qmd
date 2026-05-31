@@ -1,0 +1,366 @@
+---
+title: "Geospatial Visualization with R"
+subtitle: "From Spatial Data to Visual Insights"
+author: "Erdem Özkul"
+institute: "Hochschule Fresenius University of Applied Sciences"
+date: today
+
+format:
+  revealjs:
+    theme: simple
+    slide-number: true
+    transition: fade
+    incremental: false
+    width: 1050
+    height: 700
+  pdf:
+    toc: false
+    number-sections: false
+
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(giscoR)
+library(leaflet)
+library(scales)
+```
+
+```{r}
+#| include: false
+
+germany <- gisco_get_countries(
+  country = "DE",
+  resolution = "20",
+  spatialtype = "RG"
+)
+
+states <- gisco_get_nuts(
+  country = "DE",
+  nuts_level = 1,
+  year = "2021",
+  resolution = "20"
+)
+
+cities <- gisco_get_urban_audit(
+  country = "DE",
+  spatialtype = "LB",
+  year = "2021"
+)
+
+states_density <- states %>%
+  st_transform(3035) %>%
+  mutate(
+    area_km2 = as.numeric(st_area(.)) / 1000000,
+    pop_density = case_when(
+      NAME_LATN == "Berlin" ~ 4200,
+      NAME_LATN == "Hamburg" ~ 2500,
+      NAME_LATN == "Bremen" ~ 1600,
+      NAME_LATN == "Nordrhein-Westfalen" ~ 530,
+      NAME_LATN == "Saarland" ~ 380,
+      NAME_LATN == "Hessen" ~ 300,
+      NAME_LATN == "Baden-Württemberg" ~ 315,
+      NAME_LATN == "Bayern" ~ 190,
+      NAME_LATN == "Sachsen" ~ 220,
+      NAME_LATN == "Rheinland-Pfalz" ~ 210,
+      NAME_LATN == "Schleswig-Holstein" ~ 185,
+      NAME_LATN == "Niedersachsen" ~ 170,
+      NAME_LATN == "Thüringen" ~ 130,
+      NAME_LATN == "Brandenburg" ~ 85,
+      NAME_LATN == "Sachsen-Anhalt" ~ 105,
+      NAME_LATN == "Mecklenburg-Vorpommern" ~ 70,
+      TRUE ~ 150
+    )
+  ) %>%
+  st_transform(4326)
+
+cities_xy <- cities %>%
+  st_transform(4326) %>%
+  mutate(
+    lon = st_coordinates(.)[,1],
+    lat = st_coordinates(.)[,2]
+  )
+```
+
+## Geospatial Visualization with R
+
+### From Spatial Data to Visual Insights
+
+<br>
+
+**Data → Map → Insight → Decision**
+
+---
+
+## Why Location Matters
+
+::: {.columns}
+
+::: {.column width="33%"}
+
+### Urban Planning
+
+Land use  
+Accessibility  
+Infrastructure
+
+:::
+
+::: {.column width="33%"}
+
+### Transportation
+
+Traffic analysis  
+Mobility patterns  
+Route optimization
+
+:::
+
+::: {.column width="33%"}
+
+### Real Estate
+
+Housing prices  
+Location value  
+Market analysis
+
+:::
+
+:::
+
+<br>
+
+::: {.columns}
+
+::: {.column width="50%"}
+
+### Environment
+
+Climate analysis  
+Flood risk  
+Green spaces
+
+:::
+
+::: {.column width="50%"}
+
+### Business Intelligence
+
+Site selection  
+Customer distribution  
+Market potential
+
+:::
+
+:::
+
+---
+
+## Spatial vs Geospatial Data
+
+| Feature | Spatial Data | Geospatial Data |
+|---|---|---|
+| Reference | Any space | Earth |
+| Coordinates | Optional | Required |
+| Example | CAD drawing | GPS data |
+| Use | Design / modeling | Mapping / analysis |
+
+---
+
+## Types of Geospatial Data
+
+```{r}
+par(mfrow = c(2,2), mar = c(1,1,3,1))
+
+points <- st_as_sf(
+  data.frame(x = c(1,2,3,2.5), y = c(1,2,1.5,3)),
+  coords = c("x","y")
+)
+
+plot(st_geometry(points), pch = 16, cex = 2.5, main = "Point")
+
+line <- st_sfc(
+  st_linestring(matrix(c(1,1, 2,3, 3,2, 4,4), byrow = TRUE, ncol = 2))
+)
+
+plot(line, lwd = 4, main = "Line")
+
+poly <- st_sfc(
+  st_polygon(list(matrix(c(1,1, 4,1, 4,4, 1,4, 1,1), byrow = TRUE, ncol = 2)))
+)
+
+plot(poly, col = "grey85", border = "black", lwd = 2, main = "Polygon")
+
+r <- matrix(runif(100), nrow = 10)
+
+image(r, axes = FALSE, main = "Raster")
+```
+
+---
+
+## Typical Workflow in R
+
+<br><br>
+
+# Import → Clean → Transform CRS → Visualize → Analyze
+
+<br><br>
+
+```{r}
+#| eval: false
+st_read()
+st_transform()
+ggplot()
+```
+
+---
+
+## Main R Packages
+
+| Package | Purpose |
+|---|---|
+| `sf` | Vector spatial data |
+| `terra` | Raster data |
+| `ggplot2` | Static maps |
+| `leaflet` | Interactive maps |
+| `osmdata` | OpenStreetMap data |
+| `tmap` | Thematic mapping |
+
+---
+
+## Point Map
+
+### German Cities
+
+```{r}
+ggplot() +
+  geom_sf(data = germany, fill = "grey96", color = "grey50", linewidth = 0.3) +
+  geom_sf(data = cities, size = 1.3, alpha = 0.75) +
+  theme_void()
+```
+
+---
+
+## Choropleth Map
+
+### Population Density by State
+
+```{r}
+ggplot(states_density) +
+  geom_sf(aes(fill = pop_density), color = "white", linewidth = 0.25) +
+  scale_fill_viridis_c(
+    option = "magma",
+    labels = comma,
+    name = "People / km²"
+  ) +
+  theme_void() +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+```
+
+---
+
+## Heatmap
+
+### Density of Urban Centres
+
+```{r}
+ggplot() +
+  geom_sf(data = germany, fill = "grey96", color = "grey60", linewidth = 0.3) +
+  stat_density_2d(
+    data = cities_xy,
+    aes(
+      x = lon,
+      y = lat,
+      fill = after_stat(level),
+      alpha = after_stat(level)
+    ),
+    geom = "polygon",
+    bins = 14
+  ) +
+  scale_alpha(range = c(0.12, 0.8), guide = "none") +
+  scale_fill_viridis_c(option = "inferno", guide = "none") +
+  coord_sf(
+    xlim = c(5.5, 15.5),
+    ylim = c(47, 55.5),
+    expand = FALSE
+  ) +
+  theme_void()
+```
+
+---
+
+## Interactive Mapping
+
+::: {.content-visible when-format="html"}
+
+```{r}
+leaflet(cities) %>%
+  addTiles() %>%
+  addCircleMarkers(
+    radius = 4,
+    stroke = FALSE,
+    fillOpacity = 0.7
+  )
+```
+
+:::
+
+::: {.content-visible when-format="pdf"}
+
+```{r}
+ggplot() +
+  geom_sf(data = germany, fill = "grey96", color = "grey50", linewidth = 0.3) +
+  geom_sf(data = cities, size = 1.3, alpha = 0.75) +
+  theme_void()
+```
+
+:::
+
+---
+
+## What Each Map Type Shows
+
+| Map Type | Best For |
+|---|---|
+| Point Map | Exact locations |
+| Choropleth Map | Regional comparison |
+| Heatmap | Spatial density |
+| Interactive Map | User exploration |
+
+---
+
+## Why It Matters
+
+| From | To |
+|---|---|
+| Raw coordinates | Readable maps |
+| Complex tables | Spatial comparison |
+| Hidden patterns | Decision support |
+
+---
+
+## Conclusion
+
+<br>
+
+# Data → Maps → Insights → Decisions
+
+<br>
+
+Geospatial visualization with R helps analysts transform location-based data into clear and reproducible visual insights.
+
+---
+
+## Thank You
+
+Questions?

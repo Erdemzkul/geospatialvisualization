@@ -1,0 +1,254 @@
+{\rtf1\ansi\ansicpg1254\cocoartf2870
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 # =========================================================\
+# German Cities: Choropleth and Population Heatmap Workflow\
+# Data: GISCO / Eurostat\
+# =========================================================\
+\
+# 1. Packages -------------------------------------------------------------\
+\
+packages <- c(\
+  "sf", "tidyverse", "giscoR", "ggplot2",\
+  "eurostat", "scales", "viridis"\
+)\
+\
+installed <- packages %in% rownames(installed.packages())\
+\
+if (any(!installed)) \{\
+  install.packages(packages[!installed])\
+\}\
+\
+library(sf)\
+library(tidyverse)\
+library(giscoR)\
+library(ggplot2)\
+library(eurostat)\
+library(scales)\
+library(viridis)\
+\
+\
+# 2. Download Spatial Data ------------------------------------------------\
+\
+germany <- gisco_get_countries(\
+  country = "DE",\
+  resolution = "10",\
+  spatialtype = "RG"\
+)\
+\
+states <- gisco_get_nuts(\
+  country = "DE",\
+  nuts_level = 1,\
+  year = "2021",\
+  resolution = "10"\
+)\
+\
+cities <- gisco_get_urban_audit(\
+  country = "DE",\
+  spatialtype = "RG",\
+  level = "CITIES",\
+  year = "2021"\
+)\
+\
+\
+# 3. Transform CRS --------------------------------------------------------\
+# EPSG:3035 is suitable for European spatial analysis\
+\
+germany <- st_transform(germany, 3035)\
+states  <- st_transform(states, 3035)\
+cities  <- st_transform(cities, 3035)\
+\
+\
+# 4. Map 1: Germany Boundary ---------------------------------------------\
+\
+ggplot() +\
+  geom_sf(data = germany, fill = "grey95", color = "grey40", linewidth = 0.4) +\
+  labs(\
+    title = "Germany Boundary",\
+    subtitle = "National boundary from GISCO",\
+    caption = "Data: GISCO"\
+  ) +\
+  theme_minimal()\
+\
+\
+# 5. Map 2: German Federal States ----------------------------------------\
+\
+ggplot() +\
+  geom_sf(data = germany, fill = "grey95", color = "white") +\
+  geom_sf(data = states, fill = NA, color = "grey30", linewidth = 0.5) +\
+  labs(\
+    title = "German Federal States",\
+    subtitle = "NUTS1 state boundaries from GISCO",\
+    caption = "Data: GISCO"\
+  ) +\
+  theme_minimal()\
+\
+\
+# 6. Map 3: GISCO City Polygons ------------------------------------------\
+\
+ggplot() +\
+  geom_sf(data = germany, fill = "grey95", color = "white") +\
+  geom_sf(data = states, fill = NA, color = "grey60", linewidth = 0.35) +\
+  geom_sf(data = cities, fill = NA, color = "black", linewidth = 0.2) +\
+  labs(\
+    title = "City Boundaries in Germany",\
+    subtitle = "Urban Audit city polygons from GISCO",\
+    caption = "Data: GISCO"\
+  ) +\
+  theme_minimal()\
+\
+\
+# 7. Download Population Data --------------------------------------------\
+\
+pop <- get_eurostat(\
+  "demo_r_pjangrp3",\
+  time_format = "num"\
+)\
+\
+pop_de <- pop |>\
+  filter(\
+    sex == "T",\
+    age == "TOTAL",\
+    grepl("^DE", geo)\
+  ) |>\
+  group_by(geo) |>\
+  filter(TIME_PERIOD == max(TIME_PERIOD, na.rm = TRUE)) |>\
+  ungroup() |>\
+  select(\
+    NUTS3_2021 = geo,\
+    population = values\
+  )\
+\
+\
+# 8. Join Population with City Polygons ----------------------------------\
+\
+cities_pop <- cities |>\
+  left_join(pop_de, by = "NUTS3_2021") |>\
+  filter(!is.na(population))\
+\
+nrw <- states |>\
+  filter(NUTS_ID == "DEA")\
+\
+\
+# 9. Map 4: Population Choropleth ----------------------------------------\
+\
+ggplot() +\
+  geom_sf(data = germany, fill = "grey96", color = "white") +\
+  geom_sf(\
+    data = cities_pop,\
+    aes(fill = population),\
+    color = "white",\
+    linewidth = 0.15\
+  ) +\
+  geom_sf(data = states, fill = NA, color = "grey35", linewidth = 0.35) +\
+  geom_sf(data = nrw, fill = NA, color = "black", linewidth = 0.8) +\
+  scale_fill_viridis_c(\
+    name = "Population",\
+    trans = "log10",\
+    labels = label_number(big.mark = ",")\
+  ) +\
+  labs(\
+    title = "Population Distribution of German Cities",\
+    subtitle = "Population values joined to GISCO Urban Audit city polygons",\
+    caption = "Data: GISCO / Eurostat"\
+  ) +\
+  theme_minimal() +\
+  theme(\
+    axis.title = element_blank(),\
+    axis.text = element_blank(),\
+    axis.ticks = element_blank(),\
+    panel.grid = element_blank()\
+  )\
+\
+\
+# 10. Prepare Population-Weighted City Points -----------------------------\
+# Each city polygon is converted to one center point.\
+# Population is then used to repeat points.\
+# This creates a heatmap where larger cities have stronger influence.\
+\
+population_points <- cities_pop |>\
+  st_centroid() |>\
+  mutate(\
+    x = st_coordinates(geometry)[, 1],\
+    y = st_coordinates(geometry)[, 2],\
+    weight = round(population / 50000)\
+  ) |>\
+  filter(weight > 0) |>\
+  st_drop_geometry()\
+\
+population_points_expanded <- population_points |>\
+  uncount(weight)\
+\
+\
+# 11. Map 5: Population-Weighted Heatmap ----------------------------------\
+\
+ggplot() +\
+  geom_sf(\
+    data = germany,\
+    fill = "grey96",\
+    color = NA\
+  ) +\
+  stat_density_2d_filled(\
+    data = population_points_expanded,\
+    aes(\
+      x = x,\
+      y = y,\
+      fill = after_stat(level)\
+    ),\
+    geom = "polygon",\
+    alpha = 0.8,\
+    bins = 12,\
+    contour_var = "ndensity"\
+  ) +\
+  geom_sf(\
+    data = germany,\
+    fill = NA,\
+    color = "grey45",\
+    linewidth = 0.35\
+  ) +\
+  geom_sf(\
+    data = states,\
+    fill = NA,\
+    color = "grey65",\
+    linewidth = 0.25\
+  ) +\
+  geom_sf(\
+    data = nrw,\
+    fill = NA,\
+    color = "black",\
+    linewidth = 0.7\
+  ) +\
+  coord_sf(\
+    xlim = st_bbox(germany)[c("xmin", "xmax")],\
+    ylim = st_bbox(germany)[c("ymin", "ymax")],\
+    crs = 3035,\
+    datum = NA,\
+    expand = FALSE\
+  ) +\
+  scale_fill_viridis_d(\
+    name = "Relative population\\nconcentration",\
+    option = "magma",\
+    direction = -1,\
+    drop = FALSE\
+  ) +\
+  labs(\
+    title = "Population Concentration Heatmap in Germany",\
+    subtitle = "Population values assigned to city center points",\
+    caption = "Data: GISCO / Eurostat"\
+  ) +\
+  theme_minimal() +\
+  theme(\
+    axis.title = element_blank(),\
+    axis.text = element_blank(),\
+    axis.ticks = element_blank(),\
+    panel.grid = element_blank(),\
+    legend.position = "right",\
+    plot.title = element_text(size = 16, face = "bold"),\
+    plot.subtitle = element_text(size = 11),\
+    plot.caption = element_text(size = 8)\
+  )\
+}

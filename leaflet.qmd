@@ -1,0 +1,97 @@
+---
+title: "Interactive Green Area Map of Düsseldorf"
+format:
+  html:
+    self-contained: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+library(sf)
+library(tidyverse)
+library(leaflet)
+
+adminareas <- st_read("gis_osm_adminareas_a_free_1.shp", quiet = TRUE)
+landuse <- st_read("gis_osm_landuse_a_free_1.shp", quiet = TRUE)
+water <- st_read("gis_osm_water_a_free_1.shp", quiet = TRUE)
+roads <- st_read("gis_osm_roads_free_1.shp", quiet = TRUE)
+
+adminareas <- st_set_crs(adminareas, 4326)
+landuse <- st_set_crs(landuse, 4326)
+water <- st_set_crs(water, 4326)
+roads <- st_set_crs(roads, 4326)
+
+dusseldorf_boundary <- adminareas |>
+  filter(name == "Düsseldorf")
+
+parks <- landuse |>
+  filter(fclass %in% c("park", "forest", "grass", "recreation_ground", "meadow"))
+
+parks_clipped <- st_intersection(st_make_valid(parks), st_make_valid(dusseldorf_boundary))
+
+residential <- landuse |>
+  filter(fclass == "residential")
+
+residential_clipped <- st_intersection(st_make_valid(residential), st_make_valid(dusseldorf_boundary))
+
+water_clipped <- st_intersection(st_make_valid(water), st_make_valid(dusseldorf_boundary))
+
+roads_clipped <- st_intersection(st_make_valid(roads), st_make_valid(dusseldorf_boundary))
+
+leaflet() |>
+  addProviderTiles(providers$CartoDB.Positron) |>
+  addPolygons(
+    data = dusseldorf_boundary,
+    fillColor = "#f2f2f2",
+    fillOpacity = 0.25,
+    color = "#111111",
+    weight = 2,
+    group = "Düsseldorf Boundary"
+  ) |>
+  addPolygons(
+    data = residential_clipped,
+    fillColor = "#666666",
+    fillOpacity = 0.55,
+    color = NA,
+    popup = ~paste("Land use:", fclass),
+    group = "Residential Areas"
+  ) |>
+  addPolygons(
+    data = parks_clipped,
+    fillColor = "#2E7D32",
+    fillOpacity = 0.75,
+    color = NA,
+    popup = ~paste("Green area:", fclass),
+    group = "Green Areas"
+  ) |>
+  addPolygons(
+    data = water_clipped,
+    fillColor = "#64B5F6",
+    fillOpacity = 0.75,
+    color = NA,
+    popup = ~paste("Water:", fclass),
+    group = "Water"
+  ) |>
+  addPolylines(
+    data = roads_clipped,
+    color = "#444444",
+    weight = 0.6,
+    opacity = 0.55,
+    popup = ~paste("Road type:", fclass),
+    group = "Roads"
+  ) |>
+  addLayersControl(
+    overlayGroups = c(
+      "Düsseldorf Boundary",
+      "Residential Areas",
+      "Green Areas",
+      "Water",
+      "Roads"
+    ),
+    options = layersControlOptions(collapsed = FALSE)
+  ) |>
+  addScaleBar(position = "bottomleft")
+```
